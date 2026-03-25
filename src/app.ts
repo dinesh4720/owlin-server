@@ -31,7 +31,12 @@ export function createApp(): express.Application {
   app.use('/api', accessLogger);
 
   // ── Health (no auth) ─────────────────────────────────────────────────────
-  app.use('/api/v1', adminRouter);
+  app.get('/api/v1/health', (_req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '2.0.0' });
+  });
+
+  // ── Admin core routes (stats, data clear) ──────────────────────────────
+  app.use('/api/v1/admin', adminRouter);
 
   // ── Project API key routes (SDK-facing) ──────────────────────────────────
   app.use('/api/v1/events', eventsRouter);
