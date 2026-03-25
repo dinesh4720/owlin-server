@@ -154,7 +154,7 @@ export async function ingestBatch(
 /**
  * Query events with filters and pagination.
  */
-export async function queryEvents(projectId: string, filters: {
+export async function queryEvents(projectId: string | null, filters: {
   limit?: number;
   offset?: number;
   userId?: string;
@@ -165,8 +165,10 @@ export async function queryEvents(projectId: string, filters: {
   endDate?: string;
 }): Promise<{ events: StoredEvent[]; total: number }> {
   const db = getDb();
-  const where: string[] = ['project_id = ?'];
-  const args: any[] = [projectId];
+  const where: string[] = [];
+  const args: any[] = [];
+
+  if (projectId) { where.push('project_id = ?'); args.push(projectId); }
 
   if (filters.userId) { where.push('user_id = ?'); args.push(filters.userId); }
   if (filters.sessionId) { where.push('session_id = ?'); args.push(filters.sessionId); }
@@ -175,7 +177,7 @@ export async function queryEvents(projectId: string, filters: {
   if (filters.startDate) { where.push('timestamp >= ?'); args.push(filters.startDate); }
   if (filters.endDate) { where.push('timestamp <= ?'); args.push(filters.endDate); }
 
-  const whereClause = where.join(' AND ');
+  const whereClause = where.length > 0 ? where.join(' AND ') : '1=1';
 
   const countResult = await db.execute({ sql: `SELECT COUNT(*) as total FROM events WHERE ${whereClause}`, args });
   const total = (countResult.rows[0].total as number) ?? 0;
@@ -206,12 +208,13 @@ export async function queryEvents(projectId: string, filters: {
   return { events, total };
 }
 
-export async function getEvent(projectId: string, eventId: string): Promise<StoredEvent | null> {
+export async function getEvent(projectId: string | null, eventId: string): Promise<StoredEvent | null> {
   const db = getDb();
-  const result = await db.execute({
-    sql: 'SELECT * FROM events WHERE id = ? AND project_id = ?',
-    args: [eventId, projectId],
-  });
+  const sql = projectId
+    ? 'SELECT * FROM events WHERE id = ? AND project_id = ?'
+    : 'SELECT * FROM events WHERE id = ?';
+  const args = projectId ? [eventId, projectId] : [eventId];
+  const result = await db.execute({ sql, args });
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as any;
   return {

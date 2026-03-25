@@ -1,15 +1,13 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { projectAuth } from '../middleware/auth.js';
+import { projectAuth, projectOrAdminAuth } from '../middleware/auth.js';
 import { startSessionSchema, endSessionSchema } from '../middleware/validation.js';
 import { getDb } from '../config/database.js';
 
 const router = Router();
 
-router.use(projectAuth);
-
-// Start a session
-router.post('/start', async (req, res) => {
+// Start a session (project key only)
+router.post('/start', projectAuth, async (req, res) => {
   try {
     const data = startSessionSchema.parse(req.body);
     const db = getDb();
@@ -44,8 +42,8 @@ router.post('/start', async (req, res) => {
   }
 });
 
-// End a session
-router.post('/end', async (req, res) => {
+// End a session (project key only)
+router.post('/end', projectAuth, async (req, res) => {
   try {
     const data = endSessionSchema.parse(req.body);
     const db = getDb();
@@ -79,16 +77,17 @@ router.post('/end', async (req, res) => {
   }
 });
 
-// List sessions
-router.get('/', async (req, res) => {
+// List sessions (admin: all projects, project key: scoped)
+router.get('/', projectOrAdminAuth, async (req, res) => {
   try {
     const db = getDb();
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const offset = Number(req.query.offset) || 0;
     const active = req.query.active === 'true';
+    const projectId = req.isAdmin ? (req.query.projectId as string | undefined) : req.project!.id;
 
-    let sql = 'SELECT * FROM sessions WHERE project_id = ?';
-    const args: any[] = [req.project!.id];
+    let sql = projectId ? 'SELECT * FROM sessions WHERE project_id = ?' : 'SELECT * FROM sessions WHERE 1=1';
+    const args: any[] = projectId ? [projectId] : [];
 
     if (active) {
       sql += ' AND end_time IS NULL';
@@ -122,23 +121,26 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get session detail
-router.get('/:sessionId', async (req, res) => {
+// Get session detail (admin or project)
+router.get('/:sessionId', projectOrAdminAuth, async (req, res) => {
   try {
     const db = getDb();
-    const result = await db.execute({
-      sql: 'SELECT * FROM sessions WHERE project_id = ? AND session_id = ?',
-      args: [req.project!.id, req.params.sessionId],
-    });
+    const projectId = req.isAdmin ? null : req.project!.id;
+    const sql = projectId
+      ? 'SELECT * FROM sessions WHERE project_id = ? AND session_id = ?'
+      : 'SELECT * FROM sessions WHERE session_id = ?';
+    const args = projectId ? [projectId, req.params.sessionId] : [req.params.sessionId];
+    const result = await db.execute({ sql, args });
 
     if (result.rows.length === 0) { res.status(404).json({ error: 'Session not found' }); return; }
     const r = result.rows[0] as any;
 
     // Get session events
-    const eventsResult = await db.execute({
-      sql: 'SELECT id, type, timestamp, page, action FROM events WHERE project_id = ? AND session_id = ? ORDER BY timestamp ASC',
-      args: [req.project!.id, req.params.sessionId],
-    });
+    const evtSql = projectId
+      ? 'SELECT id, type, timestamp, page, action FROM events WHERE project_id = ? AND session_id = ? ORDER BY timestamp ASC'
+      : 'SELECT id, type, timestamp, page, action FROM events WHERE session_id = ? ORDER BY timestamp ASC';
+    const evtArgs = projectId ? [projectId, req.params.sessionId] : [req.params.sessionId];
+    const eventsResult = await db.execute({ sql: evtSql, args: evtArgs });
 
     res.json({
       session: {

@@ -1,16 +1,13 @@
 import { Router } from 'express';
-import { projectAuth } from '../middleware/auth.js';
+import { projectAuth, projectOrAdminAuth } from '../middleware/auth.js';
 import { eventSchema, batchEventsSchema, eventsQuerySchema } from '../middleware/validation.js';
 import { ingestEvent, ingestBatch, queryEvents, getEvent } from '../services/eventService.js';
 import { incrementProjectEvents } from '../services/projectService.js';
 
 const router = Router();
 
-// All routes require project API key
-router.use(projectAuth);
-
-// Ingest single event
-router.post('/', async (req, res) => {
+// Ingest single event (project key only)
+router.post('/', projectAuth, async (req, res) => {
   try {
     const data = eventSchema.parse(req.body);
     const id = await ingestEvent(req.project!.id, data);
@@ -26,8 +23,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Ingest batch of events
-router.post('/batch', async (req, res) => {
+// Ingest batch of events (project key only)
+router.post('/batch', projectAuth, async (req, res) => {
   try {
     const data = batchEventsSchema.parse(req.body);
     const count = await ingestBatch(req.project!.id, data.events, {
@@ -47,11 +44,12 @@ router.post('/batch', async (req, res) => {
   }
 });
 
-// Query events
-router.get('/', async (req, res) => {
+// Query events (admin: all projects, project key: scoped)
+router.get('/', projectOrAdminAuth, async (req, res) => {
   try {
     const filters = eventsQuerySchema.parse(req.query);
-    const result = await queryEvents(req.project!.id, filters);
+    const projectId = req.isAdmin ? (req.query.projectId as string | undefined) ?? null : req.project!.id;
+    const result = await queryEvents(projectId, filters);
     res.json(result);
   } catch (err: any) {
     if (err.name === 'ZodError') {
@@ -62,10 +60,11 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get single event
-router.get('/:id', async (req, res) => {
+// Get single event (admin or project)
+router.get('/:id', projectOrAdminAuth, async (req, res) => {
   try {
-    const event = await getEvent(req.project!.id, req.params.id);
+    const projectId = req.isAdmin ? null : req.project!.id;
+    const event = await getEvent(projectId, req.params.id);
     if (!event) { res.status(404).json({ error: 'Event not found' }); return; }
     res.json({ event });
   } catch (err) {

@@ -91,3 +91,28 @@ export function adminAuth(req: Request, res: Response, next: NextFunction): void
   req.isAdmin = true;
   next();
 }
+
+/**
+ * Accept EITHER a project API key OR the admin key.
+ * Project key → scoped to that project (req.project set).
+ * Admin key → full access across all projects (req.isAdmin = true, no req.project).
+ */
+export async function projectOrAdminAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const apiKey = req.headers['x-api-key'] as string | undefined;
+  if (!apiKey) {
+    res.status(401).json({ error: 'Missing X-API-Key header' });
+    return;
+  }
+
+  const env = getEnv();
+
+  // Check admin key first
+  if (apiKey === env.OWLIN_ADMIN_KEY) {
+    req.isAdmin = true;
+    next();
+    return;
+  }
+
+  // Fall back to project key auth
+  return projectAuth(req, res, next);
+}

@@ -1,15 +1,13 @@
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
-import { projectAuth } from '../middleware/auth.js';
+import { projectAuth, projectOrAdminAuth } from '../middleware/auth.js';
 import { identifyUserSchema } from '../middleware/validation.js';
 import { getDb } from '../config/database.js';
 
 const router = Router();
 
-router.use(projectAuth);
-
-// Identify / upsert a user
-router.post('/identify', async (req, res) => {
+// Identify / upsert a user (project key only)
+router.post('/identify', projectAuth, async (req, res) => {
   try {
     const data = identifyUserSchema.parse(req.body);
     const db = getDb();
@@ -40,17 +38,19 @@ router.post('/identify', async (req, res) => {
   }
 });
 
-// List tracked users
-router.get('/', async (req, res) => {
+// List tracked users (admin: all, project key: scoped)
+router.get('/', projectOrAdminAuth, async (req, res) => {
   try {
     const db = getDb();
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const offset = Number(req.query.offset) || 0;
+    const projectId = req.isAdmin ? (req.query.projectId as string | undefined) : req.project!.id;
 
-    const result = await db.execute({
-      sql: 'SELECT * FROM tracked_users WHERE project_id = ? ORDER BY last_seen DESC LIMIT ? OFFSET ?',
-      args: [req.project!.id, limit, offset],
-    });
+    const sql = projectId
+      ? 'SELECT * FROM tracked_users WHERE project_id = ? ORDER BY last_seen DESC LIMIT ? OFFSET ?'
+      : 'SELECT * FROM tracked_users ORDER BY last_seen DESC LIMIT ? OFFSET ?';
+    const args = projectId ? [projectId, limit, offset] : [limit, offset];
+    const result = await db.execute({ sql, args });
 
     const users = result.rows.map((r: any) => ({
       id: r.id,
@@ -69,23 +69,26 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get user detail
-router.get('/:userId', async (req, res) => {
+// Get user detail (admin or project)
+router.get('/:userId', projectOrAdminAuth, async (req, res) => {
   try {
     const db = getDb();
-    const result = await db.execute({
-      sql: 'SELECT * FROM tracked_users WHERE project_id = ? AND user_id = ?',
-      args: [req.project!.id, req.params.userId],
-    });
+    const projectId = req.isAdmin ? null : req.project!.id;
+    const sql = projectId
+      ? 'SELECT * FROM tracked_users WHERE project_id = ? AND user_id = ?'
+      : 'SELECT * FROM tracked_users WHERE user_id = ?';
+    const args = projectId ? [projectId, req.params.userId] : [req.params.userId];
+    const result = await db.execute({ sql, args });
 
     if (result.rows.length === 0) { res.status(404).json({ error: 'User not found' }); return; }
     const r = result.rows[0] as any;
 
     // Get recent events
-    const eventsResult = await db.execute({
-      sql: 'SELECT * FROM events WHERE project_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT 50',
-      args: [req.project!.id, req.params.userId],
-    });
+    const evtSql = projectId
+      ? 'SELECT * FROM events WHERE project_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT 50'
+      : 'SELECT * FROM events WHERE user_id = ? ORDER BY timestamp DESC LIMIT 50';
+    const evtArgs = projectId ? [projectId, req.params.userId] : [req.params.userId];
+    const eventsResult = await db.execute({ sql: evtSql, args: evtArgs });
 
     res.json({
       user: {
