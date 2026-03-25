@@ -87,7 +87,7 @@ router.get('/:userId', projectOrAdminAuth, async (req, res) => {
     const evtSql = projectId
       ? 'SELECT * FROM events WHERE project_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT 50'
       : 'SELECT * FROM events WHERE user_id = ? ORDER BY timestamp DESC LIMIT 50';
-    const evtArgs = projectId ? [projectId, req.params.userId] : [req.params.userId];
+    const evtArgs: any[] = projectId ? [projectId, req.params.userId] : [req.params.userId];
     const eventsResult = await db.execute({ sql: evtSql, args: evtArgs });
 
     res.json({
